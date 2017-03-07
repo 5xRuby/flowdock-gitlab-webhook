@@ -96,12 +96,13 @@ class FlowdockGitlabWebhook < Sinatra::Base
     @jobj = JSON.parse(@body, object_class: OpenStruct)
     @hobj = JSON.parse(@body)
 
-    @post = {
-      event: "activity",
-      author: {name: @jobj.user.name, avatar: @jobj.user.avatar_url}
-    }
+
 
     if %w{issue note}.include? @jobj.object_kind
+      @post = {
+        event: "activity",
+        author: {name: @jobj.user.name, avatar: @jobj.user.avatar_url}
+      }
       send "process_#{@jobj.object_kind}", @jobj, @post
       @flow_api.post_to_thread @post
     end
