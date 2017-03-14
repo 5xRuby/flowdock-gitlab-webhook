@@ -55,23 +55,31 @@ class FlowdockGitlabWebhook < Sinatra::Base
       post
     end
 
-#    def process_merge_request(src, post)
-#      post[:title] = ""
-#      post[:]
-#      post[:thread] = {
-#        title:
-#        body:
-#        status:
-#        fields: [{
-#          label: 'repository',
-#          value: "<a href=''></a>"
-#        },{
-#          label: 'labels',
-#
-#        }]
-#
-#      }
-#    end
+    def process_merge_request(src, post)
+      tu = Time.parse(src.object_attributes.updated_at).localtime
+      post[:title] = "#{src.object_attributes.state} on #{tu.strftime('%b at %H:%m')}"
+      post[:external_thread_id]
+      post[:thread] = {
+        title: "\##{src.object_attributes.iid} #{src.object_attributes.title}",
+        external_url: src.object_attributes.url,
+        status: {color: STATUS_COLOR[src.object_attributes.action.to_s.to_sym], value: src.object_attributes.action},
+        fields: [{
+          label: 'repository',
+          value: gen_link(src.project.homepage, src.project.path_with_namespace)
+        },{
+          label: 'branch',
+          value: gen_link_of_repo_and_branch(src.project.homepage, src.object_attributes.source_branch)
+        }]
+      }
+    end
+
+    def gen_link_of_repo_and_branch(repo_base_url, branch_name)
+      "#{repo_base_url}/tree/#{branch_name}"
+    end
+
+    def gen_link(href, text)
+      sprintf '<a href="%s">%s</a>', href, text
+    end
 
     def gen_tid_of_issue(id)
       "issue-#{id}"
@@ -84,11 +92,11 @@ class FlowdockGitlabWebhook < Sinatra::Base
     def process_push(src, api)
       # because we may have many commits in a push so we have to post many times
       branch_name = src.ref.gsub("refs/heads/", '')
-        push_title = if src.before.to_i == 0 #means first time push of a branch
-                     "Created branch #{branch_name} at #{src.project.path_with_namespace}"
-                   else
-                     "#{branch_name} at #{src.project.path_with_namespace} updated"
-                   end
+      push_title = if src.before.to_i == 0 #means first time push of a branch
+                   "Created branch #{branch_name} at #{src.project.path_with_namespace}"
+                 else
+                   "#{branch_name} at #{src.project.path_with_namespace} updated"
+                 end
       external_thread_id = "commits-of-#{branch_name}"
       branch_url = src.project.web_url + "/tree/#{branch_name}"
       post ={
@@ -141,7 +149,7 @@ class FlowdockGitlabWebhook < Sinatra::Base
     @hobj = JSON.parse(@body)
 
     case @jobj.object_kind
-    when "issue", "note"
+    when "issue", "note", "merge_request"
       @post = {
         event: "activity",
         author: {name: @jobj.user.name, avatar: @jobj.user.avatar_url}
