@@ -55,7 +55,7 @@ class FlowdockGitlabWebhook < Sinatra::Base
       post
     end
 
-    def process_merge_request(src, post, api)
+    def process_merge_request(src, post)
       tu = Time.parse(src.object_attributes.updated_at).localtime
       post[:title] = "#{src.object_attributes.state} on #{tu.strftime('%b at %H:%m')}"
       post[:external_thread_id]
