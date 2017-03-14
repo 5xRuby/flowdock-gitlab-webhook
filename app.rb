@@ -57,8 +57,14 @@ class FlowdockGitlabWebhook < Sinatra::Base
 
     def process_merge_request(src, post)
       tu = Time.parse(src.object_attributes.updated_at).localtime
-      post[:title] = "#{src.object_attributes.state} on #{tu.strftime('%b at %H:%m')}"
-      post[:external_thread_id]
+      ts = tu.strftime('on %b %d')
+      lc = src.object_attributes.last_commit
+      post[:title] = if src.object_attributes.action == "merge"
+                       "merged at #{gen_link(lc.url, lc.id[0..6])} and closed #{ts}"
+                     else
+                       "#{src.object_attributes.action}ed #{ts}"
+                     end
+      post[:external_thread_id] = "pull-req-#{src.object_attributes.id}"
       post[:thread] = {
         title: "\##{src.object_attributes.iid} #{src.object_attributes.title}",
         external_url: src.object_attributes.url,
@@ -74,7 +80,7 @@ class FlowdockGitlabWebhook < Sinatra::Base
     end
 
     def gen_link_of_repo_and_branch(repo_base_url, branch_name)
-      "#{repo_base_url}/tree/#{branch_name}"
+      gen_link "#{repo_base_url}/tree/#{branch_name}", branch_name
     end
 
     def gen_link(href, text)
@@ -149,7 +155,7 @@ class FlowdockGitlabWebhook < Sinatra::Base
     @hobj = JSON.parse(@body)
 
     case @jobj.object_kind
-    when "issue", "note"#, "merge_request"
+    when "issue", "note", "merge_request"
       @post = {
         event: "activity",
         author: {name: @jobj.user.name, avatar: @jobj.user.avatar_url}
