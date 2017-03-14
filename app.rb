@@ -169,7 +169,7 @@ class FlowdockGitlabWebhook < Sinatra::Base
   post '/:flow_api_token.json' do
     token = request.env['HTTP_X_GITLAB_TOKEN']
     @body = request.body.read
-    puts @body
+    #puts @body
     @flow_api = Flowdock::Client.new(flow_token: params[:flow_api_token])
     @jobj = JSON.parse(@body, object_class: OpenStruct)
     @hobj = JSON.parse(@body)
