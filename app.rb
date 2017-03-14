@@ -149,7 +149,7 @@ class FlowdockGitlabWebhook < Sinatra::Base
     @hobj = JSON.parse(@body)
 
     case @jobj.object_kind
-    when "issue", "note", "merge_request"
+    when "issue", "note"#, "merge_request"
       @post = {
         event: "activity",
         author: {name: @jobj.user.name, avatar: @jobj.user.avatar_url}
