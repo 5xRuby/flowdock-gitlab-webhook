@@ -45,10 +45,24 @@ class FlowdockGitlabWebhook < Sinatra::Base
         post[:body] = src.object_attributes.note
         post[:external_thread_id] = "commit-#{src.object_attributes.commit_id}-comments"
       when "MergeRequest"
+        post[:title] = gen_link(tg.url, "commented")
+        post[:body] = tg.note
+        #原本不應該在這邊生但是為了因應之前如果沒有先出來 PR request 的 case
+        mr = src.merge_request
+        post[:external_thread_id] = gen_tid_of_merge_request(mr.id)
+        # 這邊無法像 process_merge_request 一樣取得完整資料
+        post[:thread] = {
+          title: "\##{mr.iid} #{mr.title}",
+          external_url: "#{mr.source.homepage}/merge_requests/#{mr.iid}"
+        }
       when "Issue"
         post[:title] = "#{src.user.userename} <a href='#{src.object_attributes.url}'>commented</a> on Gitlab"
         post[:body] = src.object_attributes.note
         post[:external_thread_id] = gen_tid_of_issue(src.issue.id)
+        post[:thread] = {
+          title: gen_title_of_issue(src.issue),
+          body: src.issue.description
+        }
       when "Snippet"
       else
       end
@@ -64,7 +78,7 @@ class FlowdockGitlabWebhook < Sinatra::Base
                      else
                        "#{src.object_attributes.action}ed #{ts}"
                      end
-      post[:external_thread_id] = "pull-req-#{src.object_attributes.id}"
+      post[:external_thread_id] = gen_tid_of_merge_request(src.object_attributes.id)
       post[:thread] = {
         title: "\##{src.object_attributes.iid} #{src.object_attributes.title}",
         external_url: src.object_attributes.url,
@@ -91,6 +105,14 @@ class FlowdockGitlabWebhook < Sinatra::Base
       "issue-#{id}"
     end
 
+    def gen_tid_of_merge_request(id)
+      "pull-req-#{id}"
+    end
+
+    def gen_tid_of_branch_commit(branch_name)
+      "commits-of-#{branch_name}"
+    end
+
     def gen_title_of_issue(issue)
       "\##{issue.id}: #{issue.title}"
     end
@@ -103,7 +125,7 @@ class FlowdockGitlabWebhook < Sinatra::Base
                  else
                    "#{branch_name} at #{src.project.path_with_namespace} updated"
                  end
-      external_thread_id = "commits-of-#{branch_name}"
+      external_thread_id = gen_tid_of_branch_commit(branch_name)
       branch_url = src.project.web_url + "/tree/#{branch_name}"
       post ={
         event: "activity",
