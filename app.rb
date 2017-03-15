@@ -10,21 +10,30 @@ ROOT_DIR = File.dirname(__FILE__) + '/../' unless defined? ROOT_DIR
 Bundler.setup
 Bundler.require :default, :assets, RACK_ENV
 
-#$LOAD_PATH << File.expand_path(File.join(ROOT_DIR, 'app/models'))
-#$LOAD_PATH << File.expand_path(File.join(ROOT_DIR, 'lib/'))
-
-#set :bind, '0.0.0.0'
-
 class FlowdockGitlabWebhook < Sinatra::Base
   configure :development do
     register Sinatra::Reloader
   end
 
+  configure do
+    set :gitlab_token, ENV['GITLAB_TOKEN']
+  end
+  #Available colors: red, green, yellow, cyan, orange, grey, black, lime, purple, blue
+  #See https://www.flowdock.com/api/threads
+
   STATUS_COLOR = {
+    pending: "grey",
+    running: "green",
+    success: "blue",
+    failed: "red",
     reopen: "green",
+    reopened: "green",
     open: "green",
+    opened: "green",
     close: "red",
-    merge: "purple"
+    closed: "red",
+    merge: "purple",
+    merged: "purple"
   }
 
   helpers do
@@ -33,22 +42,37 @@ class FlowdockGitlabWebhook < Sinatra::Base
       tg = src.object_attributes
       case tg.noteable_type
       when "Commit"
+        #built with thread together
         post[:thread] = {
           title: "#{src.project.path_with_namespace} commit #{src.object_attributes.commit_id[0..6]} commented",
-          fields: [{
-            label: 'repository',
-            value: "<a href='#{src.project.homepage}'>#{src.project.path_with_namespace}</a>"
-          }]
+          fields: [gen_field_hash('repository', gen_link(src.project.homepage, src.project.path_with_namespace))]
         }
-        cat = Time.parse(src.object_attributes.created_at)
-        post[:title] = "<a href='#{src.object_attributes.url}'>commented #{src.object_attributes.position.old_path} at #{cat.localtime.strftime("%Y/%m/%d %H:%M")}</a>"
-        post[:body] = src.object_attributes.note
-        post[:external_thread_id] = "commit-#{src.object_attributes.commit_id}-comments"
+        post[:title] = if tg.position #means comment on line of code
+                         gen_link tg.url, "commented file #{tg.position.old_path}"
+                       else
+                         gen_link tg.url, "commented commit #{tg.commit_id[0..6]}"
+                       end
+        post[:body] = tg.note
+        post[:external_thread_id] = gen_tid_of_commit_comments(tg.commit_id)
       when "MergeRequest"
+        post[:title] = gen_link(tg.url, "commented")
+        post[:body] = tg.note
+        #also build thread if not created with the PR together
+        mr = src.merge_request
+        post[:external_thread_id] = gen_tid_of_merge_request(mr.id)
+        #Since we can't get enough data as the PR webhook so just build simplified version
+        post[:thread] = {
+          title: "\##{mr.iid} #{mr.title}",
+          external_url: "#{mr.source.homepage}/merge_requests/#{mr.iid}"
+        }
       when "Issue"
         post[:title] = "#{src.user.userename} <a href='#{src.object_attributes.url}'>commented</a> on Gitlab"
         post[:body] = src.object_attributes.note
         post[:external_thread_id] = gen_tid_of_issue(src.issue.id)
+        post[:thread] = {
+          title: gen_title_of_issue(src.issue),
+          body: src.issue.description
+        }
       when "Snippet"
       else
       end
@@ -56,43 +80,21 @@ class FlowdockGitlabWebhook < Sinatra::Base
     end
 
     def process_merge_request(src, post)
-      tu = Time.parse(src.object_attributes.updated_at).localtime
-      ts = tu.strftime('on %b %d')
+      ts = Time.parse(src.object_attributes.updated_at).localtime.strftime('on %b %d')
       lc = src.object_attributes.last_commit
       post[:title] = if src.object_attributes.action == "merge"
                        "merged at #{gen_link(lc.url, lc.id[0..6])} and closed #{ts}"
                      else
                        "#{src.object_attributes.action}ed #{ts}"
                      end
-      post[:external_thread_id] = "pull-req-#{src.object_attributes.id}"
+      post[:external_thread_id] = gen_tid_of_merge_request(src.object_attributes.id)
       post[:thread] = {
         title: "\##{src.object_attributes.iid} #{src.object_attributes.title}",
         external_url: src.object_attributes.url,
-        status: {color: STATUS_COLOR[src.object_attributes.action.to_s.to_sym], value: src.object_attributes.action},
-        fields: [{
-          label: 'repository',
-          value: gen_link(src.project.homepage, src.project.path_with_namespace)
-        },{
-          label: 'branch',
-          value: gen_link_of_repo_and_branch(src.project.homepage, src.object_attributes.source_branch)
-        }]
+        status: gen_state_label_hash(src.object_attributes.state),
+        fields: [gen_field_hash('repository', gen_link(src.project.homepage, src.project.path_with_namespace)), gen_field_hash('branch', gen_link_of_repo_and_branch(src.project.homepage, src.object_attributes.source_branch))]
       }
-    end
-
-    def gen_link_of_repo_and_branch(repo_base_url, branch_name)
-      gen_link "#{repo_base_url}/tree/#{branch_name}", branch_name
-    end
-
-    def gen_link(href, text)
-      sprintf '<a href="%s">%s</a>', href, text
-    end
-
-    def gen_tid_of_issue(id)
-      "issue-#{id}"
-    end
-
-    def gen_title_of_issue(issue)
-      "\##{issue.id}: #{issue.title}"
+      post
     end
 
     def process_push(src, api)
@@ -103,7 +105,7 @@ class FlowdockGitlabWebhook < Sinatra::Base
                  else
                    "#{branch_name} at #{src.project.path_with_namespace} updated"
                  end
-      external_thread_id = "commits-of-#{branch_name}"
+      external_thread_id = gen_tid_of_branch_commit(branch_name)
       branch_url = src.project.web_url + "/tree/#{branch_name}"
       post ={
         event: "activity",
@@ -124,38 +126,92 @@ class FlowdockGitlabWebhook < Sinatra::Base
     end
 
     def process_issue(src, post)
-      #這個 title 是小標
+      #title of action/discussion
       post[:title] = "#{src.user.name} #{src.object_attributes.state} issue"
       post[:external_thread_id] = gen_tid_of_issue(src.object_attributes.id)
-      #post[:thread_id] = gen_tid_of_issue(src.object_attributes.id)
       post[:thread] = {
-        #id: gen_tid_of_issue(src.object_attributes.id),
-        #這個 title 才是大標題
         title: gen_title_of_issue(src.object_attributes),
-        fields: [{
-          label: "repository",
-          value: "<a href='#{src.object_attributes.url}'>#{src.project.path_with_namespace}</a>"
-        }],
+        fields: [gen_field_hash("repository", gen_link(src.object_attributes.url, src.project.path_with_namespace) )],
         body: src.object_attributes.description,
         external_url: src.object_attributes.url,
-        status: {color: STATUS_COLOR[src.object_attributes.action.to_s.to_sym], value: src.object_attributes.action}
+        status: gen_state_label_hash(src.object_attributes.state)
       }
       post
     end
+
+    def process_build(src, post)
+      post[:external_thread_id] = "build-#{src.build_id}"
+      tn = Time.now.localtime
+      post[:title] = "#{src.build_status} the build"
+      post[:thread] = {
+        title: "Build of commit #{src.sha[0..6]} in project #{src.project_name}",
+        status: gen_state_label_hash(src.build_status)
+      }
+      post
+    end
+
+    def process_pipeline(src, post)
+      pp = src.object_attributes
+      post[:external_thread_id] = "pipeline-#{pp.id}"
+      post[:title] = "The build is #{pp.status}"
+      post[:thread] = {
+        title: "Pipeline of commit #{pp.sha[0..6]} in project #{src.project.path_with_namespace}",
+        status: gen_state_label_hash(pp.status)
+      }
+      post
+    end
+
+    def gen_link_of_repo_and_branch(repo_base_url, branch_name)
+      gen_link "#{repo_base_url}/tree/#{branch_name}", branch_name
+    end
+
+    def gen_link(href, text)
+      sprintf '<a href="%s">%s</a>', href, text
+    end
+
+    def gen_tid_of_commit_comments(commit_id)
+      "commit-#{commit_id}-comments"
+    end
+
+    def gen_tid_of_issue(id)
+      "issue-#{id}"
+    end
+
+    def gen_tid_of_merge_request(id)
+      "pull-req-#{id}"
+    end
+
+    def gen_tid_of_branch_commit(branch_name)
+      "commits-of-#{branch_name}"
+    end
+
+    def gen_title_of_issue(issue)
+      "\##{issue.id}: #{issue.title}"
+    end
+
+    def gen_state_label_hash(state)
+      {color: STATUS_COLOR[state.to_s.to_sym], value: state}
+    end
+
+    def gen_field_hash(label, value)
+      {label: label, value: value}
+    end
+
   end
 
   post '/:flow_api_token.json' do
     token = request.env['HTTP_X_GITLAB_TOKEN']
+    if token != settings.gitlab_token
+      status 401
+      return {status: "unauthorized"}.to_json
+    end
     @body = request.body.read
-    #puts "############REQUEST BODY###################"
-    puts @body
-    #puts "############REQUEST BODY###################"
+    puts @body if RACK_ENV == 'development' #only dump in development env
     @flow_api = Flowdock::Client.new(flow_token: params[:flow_api_token])
     @jobj = JSON.parse(@body, object_class: OpenStruct)
     @hobj = JSON.parse(@body)
-
     case @jobj.object_kind
-    when "issue", "note", "merge_request"
+    when "issue", "note", "merge_request", "build", "pipeline"
       @post = {
         event: "activity",
         author: {name: @jobj.user.name, avatar: @jobj.user.avatar_url}

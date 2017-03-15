@@ -3,7 +3,7 @@ FROM ruby:2.3-alpine
 # Default Environment
 ENV BUNDLE_PATH /usr/shared/bundle
 ENV APP_HOME /usr/src/app
-ENV RAILS_ENV production
+#ENV RAILS_ENV production
 
 # Application Home
 RUN mkdir -p $APP_HOME
@@ -26,7 +26,7 @@ ADD Gemfile.lock $APP_HOME/Gemfile.lock
 # Install Dependency
 RUN cd $APP_HOME && \
     gem install puma && \
-    bundle install --without development test --path $BUNDLE_PATH
+    bundle install --path $BUNDLE_PATH
 
 # Add Application Source Code
 ADD . $APP_HOME
