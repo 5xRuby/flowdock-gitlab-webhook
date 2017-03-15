@@ -1,12 +1,19 @@
-###Flowdock-Gitlab-Webhook-Receiver
+# Flowdock-Gitlab-Webhook-Receiver
 
 - [Introduction](#introduction)
 - [Installation](#installation)
-- [Start](#start)
+- [Quick Start](#quick-start)
 
 # Introduction
 
-Catch Gitlab webhooks and send notification to your Flowodck inbox
+Catch Gitlab webhooks and send notification to your Flowodck inbox, so far we support the following trigger types:
+
+1.	Push
+1.	Comments of Commit / Merge Request / Issue
+1.	Issue
+1.	Merge Request
+1.	Build
+1.	Pipeline
 
 # Installation
 
@@ -16,7 +23,7 @@ docker pull ryudoawaru/flowdock-gitlab-webhook
 
 ```
 
-# Start
+# Quick Start
 
 Prepare your [secret token](https://docs.gitlab.com/ce/user/project/integrations/webhooks.html#secret-token) for Gitlab webhook use.
 
@@ -35,12 +42,3 @@ In the Flowdock flow you want to subscribe notifications, add new source of the 
 Use this flow api token and the secret token to register new webhook in your Gitlab repo, the URL pattern should be like 「http(s)://YOUR-HOST-NAME/FLOW-API-TOKEN.json」.
 
 Test it!
-
-# Support Trigger types
-
-1.	Push
-1.	Comments of Commit / Merge Request / Issue
-1.	Issue
-1.	Merge Request
-1.	Build
-1.	Pipeline
