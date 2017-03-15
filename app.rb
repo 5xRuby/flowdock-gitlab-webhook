@@ -15,7 +15,17 @@ class FlowdockGitlabWebhook < Sinatra::Base
     register Sinatra::Reloader
   end
 
+  configure do
+    set :gitlab_token, ENV['GITLAB_TOKEN']
+  end
+  #Available colors: red, green, yellow, cyan, orange, grey, black, lime, purple, blue
+  #See https://www.flowdock.com/api/threads
+
   STATUS_COLOR = {
+    pending: "grey",
+    running: "green",
+    success: "blue",
+    failed: "red",
     reopen: "green",
     reopened: "green",
     open: "green",
@@ -84,6 +94,7 @@ class FlowdockGitlabWebhook < Sinatra::Base
         status: gen_state_label_hash(src.object_attributes.state),
         fields: [gen_field_hash('repository', gen_link(src.project.homepage, src.project.path_with_namespace)), gen_field_hash('branch', gen_link_of_repo_and_branch(src.project.homepage, src.object_attributes.source_branch))]
       }
+      post
     end
 
     def process_push(src, api)
@@ -128,6 +139,28 @@ class FlowdockGitlabWebhook < Sinatra::Base
       post
     end
 
+    def process_build(src, post)
+      post[:external_thread_id] = "build-#{src.build_id}"
+      tn = Time.now.localtime
+      post[:title] = "#{src.build_status} the build"
+      post[:thread] = {
+        title: "Build of commit #{src.sha[0..6]} in project #{src.project_name}",
+        status: gen_state_label_hash(src.build_status)
+      }
+      post
+    end
+
+    def process_pipeline(src, post)
+      pp = src.object_attributes
+      post[:external_thread_id] = "pipeline-#{pp.id}"
+      post[:title] = "The build is #{pp.status}"
+      post[:thread] = {
+        title: "Pipeline of commit #{pp.sha[0..6]} in project #{src.project.path_with_namespace}",
+        status: gen_state_label_hash(pp.status)
+      }
+      post
+    end
+
     def gen_link_of_repo_and_branch(repo_base_url, branch_name)
       gen_link "#{repo_base_url}/tree/#{branch_name}", branch_name
     end
@@ -168,13 +201,17 @@ class FlowdockGitlabWebhook < Sinatra::Base
 
   post '/:flow_api_token.json' do
     token = request.env['HTTP_X_GITLAB_TOKEN']
+    if token != settings.gitlab_token
+      status 401
+      return {status: "unauthorized"}.to_json
+    end
     @body = request.body.read
-    #puts @body
+    puts @body if RACK_ENV == 'development' #only dump in development env
     @flow_api = Flowdock::Client.new(flow_token: params[:flow_api_token])
     @jobj = JSON.parse(@body, object_class: OpenStruct)
     @hobj = JSON.parse(@body)
     case @jobj.object_kind
-    when "issue", "note", "merge_request"
+    when "issue", "note", "merge_request", "build", "pipeline"
       @post = {
         event: "activity",
         author: {name: @jobj.user.name, avatar: @jobj.user.avatar_url}
