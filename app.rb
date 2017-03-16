@@ -4,8 +4,10 @@ require 'bundler'
 RACK_ENV = ENV["RACK_ENV"] ||= "development" unless defined? RACK_ENV
 
 require "sinatra/reloader" if RACK_ENV == 'development'
+require 'sucker_punch/async_syntax'
 
 ROOT_DIR = File.dirname(__FILE__) + '/../' unless defined? ROOT_DIR
+SP_JOB_WORKER_AMOUNT = ENV['JOB_WORKER_AMOUNT'].to_i > 0 ? ENV['JOB_WORKER_AMOUNT'].to_i : 2 #Default Sunker Punch worker size
 
 Bundler.setup
 Bundler.require :default, :assets, RACK_ENV
@@ -22,6 +24,7 @@ class FlowdockGitlabWebhook < Sinatra::Base
   #See https://www.flowdock.com/api/threads
 
   STATUS_COLOR = {
+    created: "blue",
     pending: "grey",
     running: "green",
     success: "blue",
@@ -97,7 +100,7 @@ class FlowdockGitlabWebhook < Sinatra::Base
       post
     end
 
-    def process_push(src, api)
+    def process_push(src)
       # because we may have many commits in a push so we have to post many times
       branch_name = src.ref.gsub("refs/heads/", '')
       push_title = if src.before.to_i == 0 #means first time push of a branch
@@ -121,7 +124,7 @@ class FlowdockGitlabWebhook < Sinatra::Base
       src.commits.each do |commit|
         post[:title] = "<a href='#{commit.url}'>#{commit.id[0..6]}</a> #{commit.message}"
         post[:external_thread_id] = external_thread_id
-        api.post_to_thread post
+        FlowdockPosterJob.perform_async post
       end
     end
 
@@ -207,7 +210,8 @@ class FlowdockGitlabWebhook < Sinatra::Base
     end
     @body = request.body.read
     puts @body if RACK_ENV == 'development' #only dump in development env
-    @flow_api = Flowdock::Client.new(flow_token: params[:flow_api_token])
+    FlowdockPosterJob.flow_token = params[:flow_api_token]
+
     @jobj = JSON.parse(@body, object_class: OpenStruct)
     @hobj = JSON.parse(@body)
     case @jobj.object_kind
@@ -217,10 +221,25 @@ class FlowdockGitlabWebhook < Sinatra::Base
         author: {name: @jobj.user.name, avatar: @jobj.user.avatar_url}
       }
       send "process_#{@jobj.object_kind}", @jobj, @post
-      @flow_api.post_to_thread @post if @post
+      FlowdockPosterJob.perform_async @post if @post
     when "push"
-      process_push @jobj, @flow_api
+      process_push @jobj
     end
     return {status: :ok}.to_json
+  end
+end
+
+class FlowdockPosterJob
+  include SuckerPunch::Job
+  workers SP_JOB_WORKER_AMOUNT
+
+  class << self
+    attr_accessor :flow_token
+  end
+
+  def perform(thread)
+    puts self.class.flow_token
+    @flow_api = Flowdock::Client.new(flow_token: self.class.flow_token)
+    @flow_api.post_to_thread thread
   end
 end
