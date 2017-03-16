@@ -148,7 +148,8 @@ class FlowdockGitlabWebhook < Sinatra::Base
       post[:title] = "#{src.build_status} the build"
       post[:thread] = {
         title: "Build of commit #{src.sha[0..6]} in project #{src.project_name}",
-        status: gen_state_label_hash(src.build_status)
+        status: gen_state_label_hash(src.build_status),
+        external_url: "#{src.repository.homepage}/builds/#{src.build_id}"
       }
       post
     end
@@ -159,7 +160,8 @@ class FlowdockGitlabWebhook < Sinatra::Base
       post[:title] = "The build is #{pp.status}"
       post[:thread] = {
         title: "Pipeline of commit #{pp.sha[0..6]} in project #{src.project.path_with_namespace}",
-        status: gen_state_label_hash(pp.status)
+        status: gen_state_label_hash(pp.status),
+        external_url: "#{src.project.web_url}/pipelines/#{pp.id}"
       }
       post
     end
