@@ -191,7 +191,7 @@ class FlowdockGitlabWebhook < Sinatra::Base
     end
 
     def gen_title_of_issue(issue)
-      "\##{issue.id}: #{issue.title}"
+      "\##{issue.iid}: #{issue.title}"
     end
 
     def gen_state_label_hash(state)
